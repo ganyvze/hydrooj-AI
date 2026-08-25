@@ -1,4 +1,4 @@
-import { NamedPage } from '@hydrooj/ui-default';
+import { addPage, NamedPage } from '@hydrooj/ui-default';
 
 declare const UiContext: Record<string, any>;
 
@@ -96,9 +96,7 @@ function createBall() {
   return ball;
 }
 
-const page = new NamedPage(['problem_detail', 'record_detail'], () => {
+addPage(new NamedPage(['problem_detail', 'record_detail'], () => {
   if (!UiContext.showAiFloatButton) return;
   createBall();
-});
-
-export default page;
+}));
