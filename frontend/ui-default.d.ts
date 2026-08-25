@@ -7,4 +7,5 @@ declare module '@hydrooj/ui-default' {
         constructor(pagename: string | string[], afterLoading?: PageCallback, beforeLoading?: PageCallback);
     }
     export class NamedPage extends Page {}
+    export function addPage(page: Page | (() => Promise<void> | void)): void;
 }
