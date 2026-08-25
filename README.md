@@ -2,7 +2,8 @@
 
 ### 简介
 
-* 为 HydroOJ 提供 AI 助手能力（当前版本先完成控制面板设置项的注册与存储）
+* 为 HydroOJ 提供 AI 助手能力
+* 开启 AI 功能后，在题目详情页与自己的提交记录页（Accepted 与 System Error 除外）显示可拖动的扁平化「AI」悬浮球，配色跟随亮/暗主题
 * 配置独立存储在插件自己的数据库集合（`ai.config`）中，不依赖 HydroOJ 的全局系统设置（`ctx.setting.SystemSetting`）
 * 管理页面 route：`/manage/ai`，默认权限为 `PRIV_MANAGE_ALL_DOMAIN`，另见控制面板「AI 管理」
 
