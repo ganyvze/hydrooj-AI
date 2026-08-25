@@ -1,146 +1,150 @@
+import { Context, Schema } from 'koishi';
 import {
-    Context, Handler, OpcountModel, PRIV, ProblemModel, RecordModel,
-    param, Schema, SystemModel, superagent, Types,
+    ConnectionHandler, OpcountModel, ProblemModel, RecordModel,
+    requireCodePerm, requireUser, setting, UserFacingError
 } from 'hydrooj';
-import { ObjectId } from 'mongodb';
 
-type ChatMessage = { role: 'user' | 'assistant'; content: string };
-
-declare module 'hydrooj' {
-    interface SystemKeys {
-        'ai-assistant.apiBaseUrl': string;
-        'ai-assistant.apiKey': string;
-        'ai-assistant.model': string;
-        'ai-assistant.maxTokens': number;
-        'ai-assistant.enabled': boolean;
-        'ai-assistant.callsPerMinute': number;
-    }
-}
-
-const MAX_MESSAGE_LENGTH = 6000;
-const MAX_HISTORY_MESSAGES = 8;
-const MAX_PROBLEM_CONTENT_LENGTH = 40_000;
-const MAX_CODE_LENGTH = 64_000;
-
-function truncate(value: unknown, maxLength: number) {
-    const text = typeof value === 'string' ? value : '';
-    return text.length > maxLength ? `${text.slice(0, maxLength)}\n\n[truncated]` : text;
-}
-
-function sanitizeHistory(value: unknown): ChatMessage[] {
-    if (!Array.isArray(value)) return [];
-    return value.slice(-MAX_HISTORY_MESSAGES).flatMap((item): ChatMessage[] => {
-        if (!item || (item.role !== 'user' && item.role !== 'assistant') || typeof item.content !== 'string') return [];
-        return [{ role: item.role, content: item.content.slice(0, MAX_MESSAGE_LENGTH) }];
-    });
-}
-
-/** 仅向提供方发送公开的题目文本以及请求用户自身的提交内容。 */
-async function askProvider(messages: ChatMessage[]) {
-    const [apiBaseUrl, apiKey, model, maxTokens] = SystemModel.getMany([
-        'ai-assistant.apiBaseUrl', 'ai-assistant.apiKey', 'ai-assistant.model', 'ai-assistant.maxTokens',
-    ]);
-    if (!apiBaseUrl || !apiKey || !model) throw new Error('AI assistant is not configured.');
-    const endpoint = `${apiBaseUrl.replace(/\/$/, '')}/chat/completions`;
-    const response = await superagent.post(endpoint)
-        .set('Authorization', `Bearer ${apiKey}`)
-        .set('Content-Type', 'application/json')
-        .timeout({ response: 15_000, deadline: 30_000 })
-        .send({ model, messages, max_tokens: maxTokens, temperature: 0.2 });
-    const content = response.body?.choices?.[0]?.message?.content;
-    if (typeof content !== 'string' || !content.trim()) throw new Error('AI provider returned an invalid response.');
-    return content;
-}
-
-abstract class AiHandler extends Handler {
-    async prepareAi() {
-        this.checkPriv(PRIV.PRIV_USER_PROFILE);
-        if (!SystemModel.get('ai-assistant.enabled')) throw new Error('AI assistant is disabled.');
-        await OpcountModel.inc('ai-assistant', this.user._id.toString(), 60,
-            SystemModel.get('ai-assistant.callsPerMinute'));
-    }
-
-    async reply(messages: ChatMessage[]) {
-        try {
-            this.response.body = { reply: await askProvider(messages) };
-        } catch (error) {
-            // 请勿向最终用户公开提供商详细信息或凭据。
-            // 请仅记录元数据：提示词、代码及服务提供商的响应正文可能包含隐私信息。
-            console.warn(`[ai-assistant] provider request failed for user=${this.user._id}`);
-            this.response.status = 502;
-            this.response.body = { error: 'AI service is temporarily unavailable.' };
-        }
-    }
-}
-
-class AiAskHandler extends AiHandler {
-    @param('pid', Types.ProblemId)
-    @param('question', Types.String)
-    @param('history', true)
-    async post(domainId: string, pid: string | number, question: string, history?: unknown) {
-        await this.prepareAi();
-        if (typeof question !== 'string' || !question.trim()) throw new Error('Question is required.');
-        const pdoc = await ProblemModel.get(domainId, pid);
-        if (!pdoc) throw new Error('Problem not found.');
-        if (!ProblemModel.canViewBy(pdoc, this.user)) throw new Error('Problem is not available.');
-        console.info(`[ai-assistant] ask user=${this.user._id} pid=${pdoc.docId}`);
-        await this.reply([
-            {
-                role: 'user',
-                content: `You are a programming contest teaching assistant. Help the user understand the public problem statement without revealing hidden tests, official solutions, or final answers.\n\nProblem title: ${pdoc.title}\n\nPublic statement:\n${truncate(pdoc.content, MAX_PROBLEM_CONTENT_LENGTH)}`,
-            },
-            ...sanitizeHistory(history),
-            { role: 'user', content: question.trim().slice(0, MAX_MESSAGE_LENGTH) },
-        ]);
-    }
-}
-
-class AiDebugHandler extends AiHandler {
-    @param('rid', Types.ObjectId)
-    @param('question', Types.String, true)
-    @param('history', true)
-    async post(domainId: string, rid: ObjectId, question = '', history?: unknown) {
-        await this.prepareAi();
-        const rdoc = await RecordModel.get(domainId, rid);
-        if (!rdoc) throw new Error('Record not found.');
-        // 切勿将其他用户的代码转发给第三方服务商，即使该代码在 Hydro 上可见。
-        if (rdoc.uid !== this.user._id) throw new Error('AI debugging is available only for your own submissions.');
-        const pdoc = await ProblemModel.get(domainId, rdoc.pid);
-        if (!pdoc) throw new Error('Problem not found.');
-        if (!ProblemModel.canViewBy(pdoc, this.user)) throw new Error('Problem is not available.');
-        console.info(`[ai-assistant] debug user=${this.user._id} rid=${rdoc._id} pid=${pdoc.docId}`);
-        await this.reply([
-            {
-                role: 'user',
-                content: `You are a programming contest debugging assistant. Explain likely defects and suggest ways to test or fix them. Do not provide hidden tests, official answers, or claim certainty from a verdict alone.\n\nProblem title: ${pdoc.title}\n\nPublic statement:\n${truncate(pdoc.content, MAX_PROBLEM_CONTENT_LENGTH)}\n\nSubmission language: ${rdoc.lang}\nVerdict: ${rdoc.status}\nScore: ${rdoc.score ?? 'N/A'}\nCompiler messages: ${truncate((rdoc.compilerTexts || []).join('\n'), MAX_MESSAGE_LENGTH)}\n\nUser submission:\n${truncate(rdoc.code, MAX_CODE_LENGTH)}`,
-            },
-            ...sanitizeHistory(history),
-            { role: 'user', content: (question || 'Please help me find what may be wrong with this submission.').slice(0, MAX_MESSAGE_LENGTH) },
-        ]);
-    }
-}
+export const name = 'AI';
 
 export function apply(ctx: Context) {
-    ctx.inject(['i18n'], (c) => {
-        c.i18n.load('en', {
-            'AI Q&A': 'AI Q&A', 'AI Debug': 'AI Debug', 'Ask AI': 'Ask AI',
-            'Send': 'Send', 'AI assistant': 'AI assistant',
-        });
-        c.i18n.load('zh', {
-            'AI Q&A': 'AI 答疑', 'AI Debug': 'AI 改错', 'Ask AI': '向 AI 提问',
-            'Send': '发送', 'AI assistant': 'AI 助手',
-        });
-    });
+    // 1. 注册系统设置
     ctx.setting.SystemSetting(Schema.object({
-        'ai-assistant': Schema.object({
-            apiBaseUrl: Schema.string().role('url').description('OpenAI-compatible API Base URL').default(''),
-            apiKey: Schema.string().role('password').description('AI provider API key').default(''),
-            model: Schema.string().description('AI model name').default(''),
-            maxTokens: Schema.number().min(64).max(8192).description('Maximum tokens per reply').default(1024),
-            enabled: Schema.boolean().description('Enable AI assistant for ordinary users').default(false),
-            callsPerMinute: Schema.number().min(1).max(60).description('Per-user AI requests per minute').default(6),
-        }),
+        ai_assistant: Schema.object({
+            enabled: Schema.boolean().description('是否开启 AI 助手').default(true),
+            apiUrl: Schema.string().description('OpenAI 兼容的 API Base URL').role('url').default('https://api.openai.com/v1/chat/completions'),
+            apiKey: Schema.string().description('API Key').role('password').default(''),
+            model: Schema.string().description('模型名称').default('gpt-3.5-turbo'),
+            maxTokens: Schema.number().description('最大回复 Token 数').default(1024),
+            rateLimit: Schema.number().description('每位用户每 10 分钟最大调用次数').default(5),
+        }).description('AI 助手设置'),
     }));
-    ctx.Route('ai_ask', '/ai/ask', AiAskHandler, PRIV.PRIV_USER_PROFILE);
-    ctx.Route('ai_debug', '/ai/debug', AiDebugHandler, PRIV.PRIV_USER_PROFILE);
+
+    // 2. 注册国际化文案
+    ctx.i18n.load('zh', {
+        'AI Assistant': 'AI 答疑',
+        'AI Debug': 'AI 改错',
+        'Ask AI': '向 AI 提问...',
+        'Rate limit exceeded': '调用太频繁，请稍后再试',
+        'AI feature is disabled': 'AI 助手当前未开启',
+    });
+    ctx.i18n.load('en', {
+        'AI Assistant': 'AI Assistant',
+        'AI Debug': 'AI Debug',
+        'Ask AI': 'Ask AI...',
+        'Rate limit exceeded': 'Rate limit exceeded, please try again later',
+        'AI feature is disabled': 'AI Assistant is currently disabled',
+    });
+
+    // 3. 注册 WebSocket 处理器
+    ctx.Connection('ai_chat_conn', '/ai/chat-conn', AiChatConnectionHandler);
+}
+
+class AiChatConnectionHandler extends ConnectionHandler {
+    async message(msg: string) {
+        const payload = JSON.parse(msg);
+        const { type, id, question, history = [] } = payload;
+        
+        try {
+            await requireUser(this.request);
+            const user = this.user;
+            const config = setting.ai_assistant;
+
+            if (!config.enabled) throw new UserFacingError('AI feature is disabled');
+
+            // 限流控制: 10分钟内最多 N 次
+            const opcount = await OpcountModel.inc(user._id, 'ai_chat', 10 * 60);
+            if (opcount > config.rateLimit) {
+                throw new UserFacingError('Rate limit exceeded');
+            }
+
+            let systemPrompt = '';
+
+            if (type === 'ask') {
+                // AI 答疑
+                const pdoc = await ProblemModel.get(setting.DOMAIN_ID, id);
+                if (!pdoc) throw new UserFacingError('Problem not found');
+                
+                // 注意隐私与安全：只提取公开的描述信息
+                systemPrompt = `你是一个算法竞赛助教。当前学生正在看题目《${pdoc.title}》。
+题目描述：${pdoc.content}
+请仅就题目理解和思路提供帮助，绝对不要直接提供完整代码或测试用例。`;
+
+            } else if (type === 'debug') {
+                // AI 改错
+                const rdoc = await RecordModel.get(setting.DOMAIN_ID, id);
+                if (!rdoc) throw new UserFacingError('Record not found');
+                
+                // 权限校验：只允许看自己代码或具有查看代码权限的用户
+                await requireCodePerm(this.request, rdoc);
+                
+                const pdoc = await ProblemModel.get(setting.DOMAIN_ID, rdoc.pid);
+                const code = rdoc.code || '';
+                const compilerText = rdoc.compilerTexts?.join('\n') || '';
+
+                systemPrompt = `你是一个算法竞赛助教。学生提交了题目《${pdoc?.title || '未知'}》的代码。
+评测状态：${rdoc.status}，得分：${rdoc.score}
+编译/错误信息：${compilerText}
+学生的代码（语言：${rdoc.lang}）：
+\`\`\`
+${code}
+\`\`\`
+请找出代码中的错误并给出提示，不要直接给出重写后的完整代码。`;
+            }
+
+            // 构造 API 请求消息体
+            const messages = [
+                { role: 'system', content: systemPrompt },
+                ...history,
+                { role: 'user', content: question }
+            ];
+
+            // 调用外部 LLM 并流式返回
+            const response = await fetch(config.apiUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${config.apiKey}`
+                },
+                body: JSON.stringify({
+                    model: config.model,
+                    messages,
+                    max_tokens: config.maxTokens,
+                    stream: true, // 开启流式
+                })
+            });
+
+            if (!response.ok) {
+                const err = await response.json();
+                this.send({ error: err.error?.message || 'LLM API Error' });
+                return;
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder('utf-8');
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) {
+                    this.send({ done: true });
+                    break;
+                }
+                const chunk = decoder.decode(value);
+                const lines = chunk.split('\n').filter(line => line.trim() !== '');
+                
+                for (const line of lines) {
+                    const message = line.replace(/^data: /, '');
+                    if (message === '[DONE]') continue;
+                    try {
+                        const parsed = JSON.parse(message);
+                        const token = parsed.choices[0]?.delta?.content || '';
+                        if (token) this.send({ token });
+                    } catch (e) {
+                        // 忽略不完整数据块的解析错误
+                    }
+                }
+            }
+        } catch (err) {
+            this.send({ error: err.message || 'Unknown error' });
+        }
+    }
 }
