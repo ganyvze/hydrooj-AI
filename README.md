@@ -1,19 +1,17 @@
-# Hydro AI Assistant addon
+# Hydro AI 助手插件
 
-This is a non-streaming framework for an OpenAI-compatible AI provider. It adds **AI Q&A** to problem-detail sidebars and **AI Debug** to record-detail sidebars.
+这是一个面向兼容 OpenAI 接口的 AI 服务提供商的非流式（non-streaming）框架。它为题目详情侧边栏增加了 **AI 问答** 功能，并为记录详情侧边栏增加了 **AI 调试** 功能。
 
-## Install
-
-Place this package under the Hydro repository's `packages/` directory (the upstream workspace glob `packages/*` discovers it), install workspace dependencies, then enable it:
+## 安装
 
 ```bash
 hydrooj addon add @hydrooj/ai-assistant
 ```
 
-Restart Hydro and configure `ai-assistant` at `/manage/config`: API Base URL, API key, model, maximum reply tokens, feature switch, and per-user request limit.
+重启 Hydro 并在 `/manage/config` 页面配置 `ai-assistant`：包括 API 基础 URL、API 密钥、模型、最大回复 Token 数、功能开关以及针对用户的请求频率限制。
 
-## Safety boundary
+## 安全边界
 
-The handlers only send the public problem statement and the requested record's code to the provider. The debug endpoint checks code-read permission, and both endpoints require a logged-in profile plus an atomic per-user minute rate limit. No chat transcript is stored. Provider failures return a friendly 502 response and are logged without prompts or API keys.
+处理程序仅向服务提供商发送公开的题目描述以及发起请求的用户自己的提交代码。这两个端点均要求用户已登录，并实施了针对每个用户的原子级分钟频率限制。提示词（Prompt）、代码和回复均有长度限制；系统不会存储聊天记录。若服务提供商发生故障，系统将返回友好的 502 响应，并记录日志（日志中不包含提示词或 API 密钥）。
 
-Before enabling during a contest, administrators should keep `enabled` off or apply a domain/contest policy. The next implementation phase can add streaming WebSocket output and an explicit domain-level switch.
+在比赛期间启用该插件前，管理员应保持 `enabled` 选项为关闭状态，或应用特定的域名/比赛策略。后续开发阶段将增加流式 WebSocket 输出以及明确的域名级功能开关。

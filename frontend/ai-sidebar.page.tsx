@@ -61,23 +61,31 @@ function openChat(mode: 'ask' | 'debug', target: string) {
     dialog.open();
 }
 
+function appendSidebarAction($sidebar: JQuery, action: 'ask' | 'debug', label: string, icon: string, onClick: () => void) {
+    if ($sidebar.find(`[data-ai-action="${action}"]`).length) return;
+    let $menu = $sidebar.find('.menu').first();
+    if (!$menu.length) {
+        $menu = $('<ol class="menu"/>');
+        $('<div class="section__body no-padding"/>').append($menu).appendTo($sidebar);
+    }
+    $('<li class="menu__item"><a class="menu__link" href="#"><span></span> </a></li>')
+        .find('a').attr('data-ai-action', action).find('span').addClass(`icon ${icon}`).end()
+        .append(document.createTextNode(label)).end()
+        .on('click', 'a', (event) => { event.preventDefault(); onClick(); })
+        .appendTo($menu);
+}
+
 new NamedPage(['problem_detail'], () => {
     const pid = idFromPath('p');
     const $menu = $('.section--problem-sidebar .menu').first();
-    if (!pid || !$menu.length || $menu.find('[data-ai-action="ask"]').length) return;
-    $('<li><a href="#" data-ai-action="ask"><span class="icon icon-comment"></span> </a></li>')
-        .find('a').append(document.createTextNode(i18n('AI Q&A'))).end()
-        .on('click', 'a', (event) => { event.preventDefault(); openChat('ask', pid); })
-        .appendTo($menu);
+    if (!pid || !$menu.length) return;
+    appendSidebarAction($menu.closest('.section--problem-sidebar'), 'ask', i18n('AI Q&A'), 'icon-comment', () => openChat('ask', pid));
 });
 
 new NamedPage(['record_detail'], () => {
     const rid = idFromPath('record');
-    const $menu = $('.section.side .menu').first();
-    // The server independently checks code visibility; this client-side button is only an affordance.
-    if (!rid || !$menu.length || $menu.find('[data-ai-action="debug"]').length) return;
-    $('<li><a href="#" data-ai-action="debug"><span class="icon icon-wrench"></span> </a></li>')
-        .find('a').append(document.createTextNode(i18n('AI Debug'))).end()
-        .on('click', 'a', (event) => { event.preventDefault(); openChat('debug', rid); })
-        .appendTo($menu);
+    const $sidebar = $('.section.side').first();
+    // 服务器仅接受提交者本人的记录；这仅仅是一种用户界面（UI）层面的交互提示。
+    if (!rid || !$sidebar.length) return;
+    appendSidebarAction($sidebar, 'debug', i18n('AI Debug'), 'icon-wrench', () => openChat('debug', rid));
 });

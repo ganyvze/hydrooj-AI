@@ -1,8 +1,6 @@
 {
-  "name": "@hydrooj/ai-assistant",
-  "version": "0.1.0",
+  "name": "hydrooj-AI",
+  "version": "1.0",
   "private": true,
-  "main": "index.ts",
-  "repository": "https://github.com/hydro-dev/Hydro",
-  "license": "AGPL-3.0-or-later"
+  "main": "index.ts"
 }
