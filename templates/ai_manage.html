@@ -1,0 +1,111 @@
+{% extends "manage_base.html" %}
+{% import "components/form.html" as form with context %}
+{% block manage_content %}
+<div class="section">
+  <div class="section__header">
+    <h1 class="section__title">{{ _('ai_manage') }}</h1>
+  </div>
+  <div class="section__body">
+    <form method="post">
+      <h2>{{ _('AI Settings') }}</h2>
+
+      <div class="row">
+        {{ form.form_checkbox({
+          columns: 12,
+          row: false,
+          label: _('Enable AI features'),
+          name: 'enabled',
+          value: config.enabled
+        }) }}
+      </div>
+
+      {{ form.form_text({
+        columns: 12,
+        label: _('API Base URL'),
+        name: 'apiUrl',
+        value: config.apiUrl,
+        placeholder: 'https://api.openai.com/v1',
+        help_text: _('OpenAI-compatible API base URL, e.g. https://api.openai.com/v1')
+      }) }}
+
+      {{ form.form_text({
+        columns: 12,
+        type: 'password',
+        label: _('API Key'),
+        name: 'apiKey',
+        value: '',
+        placeholder: _('Key saved') if config.apiKey else _('No key saved'),
+        help_text: _('Leave empty to keep the saved key')
+      }) }}
+
+      {{ form.form_text({
+        columns: 12,
+        label: _('Model'),
+        name: 'model',
+        value: config.model,
+        help_text: _('Model name, e.g. gpt-4o-mini')
+      }) }}
+
+      {{ form.form_textarea({
+        columns: 12,
+        label: _('System prompt'),
+        name: 'systemPrompt',
+        value: config.systemPrompt,
+        help_text: _('Prepended to every conversation')
+      }) }}
+
+      <div class="row">
+        {{ form.form_text({
+          columns: 4,
+          row: false,
+          type: 'number',
+          label: _('Temperature'),
+          name: 'temperature',
+          value: config.temperature,
+          help_text: _('Sampling temperature, 0 - 2')
+        }) }}
+        {{ form.form_text({
+          columns: 4,
+          row: false,
+          type: 'number',
+          label: _('Max tokens'),
+          name: 'maxTokens',
+          value: config.maxTokens
+        }) }}
+        {{ form.form_text({
+          columns: 4,
+          row: false,
+          type: 'number',
+          label: _('Timeout (seconds)'),
+          name: 'timeout',
+          value: config.timeout
+        }) }}
+      </div>
+
+      <div class="row">
+        {{ form.form_text({
+          columns: 4,
+          row: false,
+          type: 'number',
+          label: _('Rate limit'),
+          name: 'rateLimit',
+          value: config.rateLimit,
+          help_text: _('Max calls per user within the window')
+        }) }}
+        {{ form.form_text({
+          columns: 4,
+          row: false,
+          type: 'number',
+          label: _('Rate limit window (minutes)'),
+          name: 'rateLimitWindow',
+          value: config.rateLimitWindow
+        }) }}
+      </div>
+
+      <button name="operation" value="save" type="submit" class="rounded primary button">
+        {{ _('Save') }}
+      </button>
+    </form>
+  </div>
+</div>
+{% endblock %}
