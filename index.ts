@@ -1,5 +1,5 @@
 import {
-    Context, Handler, param, PRIV, Types,
+    Context, Handler, param, PRIV, STATUS, Types,
 } from 'hydrooj';
 import { AiConfig } from './model';
 
@@ -57,6 +57,26 @@ class AiManageHandler extends Handler {
 export async function apply(ctx: Context) {
     ctx.Route('ai_manage', '/manage/ai', AiManageHandler, PRIV.PRIV_MANAGE_ALL_DOMAIN);
     ctx.injectUI('ControlPanel', 'ai_manage');
+
+    // Show the AI float ball on problem detail pages.
+    ctx.on('handler/after/ProblemDetail#get', async (that) => {
+        const config = await AiModel.getConfig(ctx);
+        if (!config.enabled) return;
+        if (!that.user._id) return;
+        that.UiContext.showAiFloatButton = true;
+    });
+
+    // Show the AI float ball on the user's own record pages,
+    // except for Accepted and System Error submissions.
+    ctx.on('handler/after/RecordDetail#get', async (that) => {
+        const config = await AiModel.getConfig(ctx);
+        if (!config.enabled) return;
+        const rdoc = that.rdoc;
+        if (!rdoc) return;
+        if (rdoc.uid !== that.user._id) return;
+        if ([STATUS.STATUS_ACCEPTED, STATUS.STATUS_SYSTEM_ERROR].includes(rdoc.status)) return;
+        that.UiContext.showAiFloatButton = true;
+    });
 
     ctx.i18n.load('zh', {
         ai_manage: 'AI 管理',
