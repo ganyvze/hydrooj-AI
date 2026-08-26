@@ -1,7 +1,6 @@
 import {
     Context, Handler, param, PRIV, PERM, STATUS, Types,
 } from 'hydrooj';
-import { ObjectId } from 'mongodb';
 import { AiConfig } from './model';
 
 const AiModel = global.Hydro.model.ai;
@@ -114,7 +113,8 @@ class AiChatHandler extends Handler {
         // 装配上下文
         try {
             if (body.contextType === 'record' && body.rid) {
-                const rdoc = await RecordModel.get(domain, new ObjectId(body.rid));
+                const rid = Types.ObjectId(body.rid);
+                const rdoc = await RecordModel.get(domain, rid);
                 if (rdoc && (rdoc.uid === this.user._id || this.user.hasPerm(PERM.PERM_VIEW_RECORD))) {
                     const pdoc = await ProblemModel.get(domain, rdoc.pid);
                     const statusStr = STATUS_TEXT[rdoc.status] || `状态码 ${rdoc.status}`;
@@ -149,7 +149,7 @@ ${pdoc.content ? pdoc.content.slice(0, 4000) : '（无题面描述）'}
                 }
             }
         } catch (e) {
-            // 忽略上下文加载失败，保证基本对话可用
+            // 忽略上下文解析失败，保证基础对话可用
         }
 
         const systemMessage = {
@@ -189,9 +189,6 @@ ${pdoc.content ? pdoc.content.slice(0, 4000) : '（无题面描述）'}
         try {
             const apiUrl = `${config.apiUrl.replace(/\/+$/, '')}/chat/completions`;
             const timeoutSignal = AbortSignal.timeout((config.timeout || 60) * 1000);
-            
-            // 合并超时信号与请求中断信号
-            const combinedSignal = abortController.signal;
             timeoutSignal.addEventListener('abort', () => abortController.abort(), { once: true });
 
             const upstreamRes = await fetch(apiUrl, {
@@ -207,7 +204,7 @@ ${pdoc.content ? pdoc.content.slice(0, 4000) : '（无题面描述）'}
                     max_tokens: config.maxTokens ?? 1024,
                     stream: true,
                 }),
-                signal: combinedSignal,
+                signal: abortController.signal,
             });
 
             if (!upstreamRes.ok) {
@@ -252,7 +249,7 @@ ${pdoc.content ? pdoc.content.slice(0, 4000) : '（无题面描述）'}
                                 res.write(`data: ${JSON.stringify({ delta })}\n\n`);
                             }
                         } catch {
-                            // 忽略单个 chunk 的 JSON 解析错误
+                            // 忽略单个 chunk 的解析异常
                         }
                     }
                 }
