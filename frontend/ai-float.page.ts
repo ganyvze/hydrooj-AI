@@ -794,7 +794,7 @@ function setupAiAssistantUI() {
       <div class="ai-msg-content-wrap">
         <div class="ai-msg-bubble">
           <div class="ai-thinking-card">
-            <span>思考中...</span>
+            <span>思考中</span>
             <div class="ai-thinking-dots">
               <div class="ai-thinking-dot"></div>
               <div class="ai-thinking-dot"></div>
