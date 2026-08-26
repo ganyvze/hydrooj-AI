@@ -275,6 +275,36 @@ const css = `
   white-space: pre-wrap;
 }
 
+/* 思考中动画提示 */
+.ai-thinking-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  background: rgba(37, 99, 235, 0.08);
+  color: #2563eb;
+  font-size: 13px;
+  font-weight: 500;
+}
+.ai-thinking-dots {
+  display: inline-flex;
+  gap: 4px;
+}
+.ai-thinking-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #2563eb;
+  animation: aiBounce 1.4s infinite ease-in-out both;
+}
+.ai-thinking-dot:nth-child(1) { animation-delay: -0.32s; }
+.ai-thinking-dot:nth-child(2) { animation-delay: -0.16s; }
+@keyframes aiBounce {
+  0%, 80%, 100% { transform: scale(0.2); opacity: 0.4; }
+  40% { transform: scale(1); opacity: 1; }
+}
+
 /* Markdown 与代码块样式 */
 .ai-msg-bubble h3, .ai-msg-bubble h4, .ai-msg-bubble h5 {
   margin: 8px 0 4px 0;
@@ -469,6 +499,13 @@ const css = `
   background: #27272a;
   color: #f4f4f5;
 }
+.theme--dark .ai-thinking-card {
+  background: rgba(59, 130, 246, 0.15);
+  color: #93c5fd;
+}
+.theme--dark .ai-thinking-dot {
+  background: #93c5fd;
+}
 .theme--dark .ai-inline-code {
   background: rgba(255, 255, 255, 0.12);
   color: #fca5a5;
@@ -561,6 +598,24 @@ function renderMarkdown(raw: string): string {
   return text;
 }
 
+// 页面 DOM 兜底提取器
+function getPageContextFallback() {
+  let fallbackTitle = '';
+  let fallbackContent = '';
+  let fallbackCode = '';
+
+  const titleEl = document.querySelector('.section__title') || document.querySelector('.problem__title') || document.querySelector('h1');
+  if (titleEl) fallbackTitle = titleEl.textContent?.trim() || '';
+
+  const contentEl = document.querySelector('.problem-content') || document.querySelector('.problem__content') || document.querySelector('.section__body');
+  if (contentEl) fallbackContent = contentEl.textContent?.slice(0, 3000)?.trim() || '';
+
+  const codeEl = document.querySelector('.code-box pre') || document.querySelector('.ace_content') || document.querySelector('pre');
+  if (codeEl) fallbackCode = codeEl.textContent?.slice(0, 4000)?.trim() || '';
+
+  return { fallbackTitle, fallbackContent, fallbackCode };
+}
+
 function setupAiAssistantUI() {
   const style = document.createElement('style');
   style.textContent = css;
@@ -604,7 +659,7 @@ function setupAiAssistantUI() {
     <div class="ai-body" id="ai-body">
       <div class="ai-welcome-card" id="ai-welcome">
         <h4>${ICONS.sparkle} 你好！我是你的算法竞赛助手</h4>
-        <div>${isRecordPage ? '已自动载入你本次提交的代码与评测状态。请问需要排查哪方面的疑问？' : '已自动载入当前题面信息。需要思路分析或复杂度建议随时问我！'}</div>
+        <div>${isRecordPage ? '已自动载入你的提交代码与评测状态。有疑问可以随时提问！' : '已自动载入当前题目背景。需要思路解析或复杂度建议可以随时问我！'}</div>
         <div class="ai-prompts-group">${welcomePrompts}</div>
       </div>
     </div>
@@ -737,7 +792,16 @@ function setupAiAssistantUI() {
     msgEl.innerHTML = `
       <div class="ai-msg-avatar">${ICONS.robot}</div>
       <div class="ai-msg-content-wrap">
-        <div class="ai-msg-bubble"></div>
+        <div class="ai-msg-bubble">
+          <div class="ai-thinking-card">
+            <span>思考中...</span>
+            <div class="ai-thinking-dots">
+              <div class="ai-thinking-dot"></div>
+              <div class="ai-thinking-dot"></div>
+              <div class="ai-thinking-dot"></div>
+            </div>
+          </div>
+        </div>
       </div>
     `;
     bodyEl.appendChild(msgEl);
@@ -769,6 +833,9 @@ function setupAiAssistantUI() {
 
     currentAbortController = new AbortController();
 
+    // 获取前端页面数据作为兜底
+    const { fallbackTitle, fallbackContent, fallbackCode } = getPageContextFallback();
+
     try {
       const res = await fetch('/api/ai/chat', {
         method: 'POST',
@@ -779,6 +846,9 @@ function setupAiAssistantUI() {
           pid: aiCtx.pid,
           rid: aiCtx.rid,
           domainId: aiCtx.domainId,
+          fallbackTitle,
+          fallbackContent,
+          fallbackCode,
         }),
         signal: currentAbortController.signal,
       });
@@ -829,14 +899,14 @@ function setupAiAssistantUI() {
               bubbleEl.innerHTML = renderMarkdown(assistantMsg.content);
               bodyEl.scrollTop = bodyEl.scrollHeight;
             } catch {
-              // 忽略单个 chunk 的解析异常
+              // ignore
             }
           }
         }
       }
 
       if (!assistantMsg.content.trim()) {
-        assistantMsg.content = '⚠️ **提示**：未收到 AI 返回内容。请检查后台设置中的模型名称（如 `glm-4-flash`）是否正确。';
+        assistantMsg.content = '⚠️ **提示**：未收到 AI 返回内容，请检查后台配置。';
         bubbleEl.innerHTML = renderMarkdown(assistantMsg.content);
       }
     } catch (err: any) {

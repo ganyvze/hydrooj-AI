@@ -6,6 +6,7 @@ import { AiConfig } from './model';
 const AiModel = global.Hydro.model.ai;
 const ProblemModel = (global.Hydro.model as any).problem;
 const RecordModel = (global.Hydro.model as any).record;
+const StorageModel = (global.Hydro.model as any).storage;
 
 const STATUS_TEXT: Record<number, string> = {
     [STATUS.STATUS_WAITING]: '等待评测 (Waiting)',
@@ -20,6 +21,67 @@ const STATUS_TEXT: Record<number, string> = {
     [STATUS.STATUS_CANCELED]: '评测已取消 (Canceled)',
     [STATUS.STATUS_ETC]: '其他错误 (ETC)',
 };
+
+// 辅助函数：多策略获取题目详情
+async function fetchProblemDoc(ctx: Context, domain: string, pid: string | number) {
+    if (!pid) return null;
+    try {
+        let pdoc = await ProblemModel.get(domain, pid, true);
+        if (!pdoc && typeof pid === 'string' && /^\d+$/.test(pid)) {
+            pdoc = await ProblemModel.get(domain, +pid, true);
+        }
+        if (!pdoc && typeof pid === 'number') {
+            pdoc = await ProblemModel.get(domain, String(pid), true);
+        }
+        if (!pdoc) {
+            const numPid = Number(pid);
+            const query: any = {
+                $or: [
+                    { pid: String(pid) },
+                    { docId: isNaN(numPid) ? pid : numPid },
+                    { pid: isNaN(numPid) ? pid : numPid },
+                ],
+            };
+            if (domain && domain !== 'system') {
+                pdoc = await ctx.db.collection('problem').findOne({ domainId: domain, ...query });
+            }
+            if (!pdoc) {
+                pdoc = await ctx.db.collection('problem').findOne(query);
+            }
+        }
+        return pdoc;
+    } catch (e) {
+        return null;
+    }
+}
+
+// 辅助函数：从 MongoDB 或 Storage 提取提交的代码
+async function fetchRecordCode(rdoc: any): Promise<string> {
+    if (!rdoc) return '';
+    if (rdoc.code && typeof rdoc.code === 'string') {
+        return rdoc.code;
+    }
+    if (rdoc.files?.code && StorageModel?.get) {
+        try {
+            const [fileId] = String(rdoc.files.code).split('#');
+            if (fileId) {
+                const streamOrBuf = await StorageModel.get(`submission/${fileId}`);
+                if (Buffer.isBuffer(streamOrBuf)) {
+                    return streamOrBuf.toString('utf-8');
+                } else if (streamOrBuf && typeof (streamOrBuf as any).read === 'function') {
+                    const chunks: Buffer[] = [];
+                    for await (const chunk of streamOrBuf) {
+                        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+                    }
+                    return Buffer.concat(chunks).toString('utf-8');
+                }
+            }
+        } catch (e) {
+            // ignore
+        }
+    }
+    return '';
+}
 
 class AiManageHandler extends Handler {
     async get() {
@@ -76,6 +138,9 @@ class AiChatHandler extends Handler {
             pid?: string | number;
             rid?: string;
             domainId?: string;
+            fallbackTitle?: string;
+            fallbackContent?: string;
+            fallbackCode?: string;
         };
 
         if (!this.user._id) {
@@ -116,48 +181,58 @@ class AiChatHandler extends Handler {
                 const rid = Types.ObjectId(body.rid);
                 const rdoc = await RecordModel.get(domain, rid);
                 if (rdoc && (rdoc.uid === this.user._id || this.user.hasPerm(PERM.PERM_VIEW_RECORD))) {
-                    const pdoc = await ProblemModel.get(domain, rdoc.pid);
+                    const pdoc = await fetchProblemDoc(this.ctx, domain, rdoc.pid);
+                    const userCode = (await fetchRecordCode(rdoc)) || body.fallbackCode || '';
+                    const problemTitle = pdoc?.title || body.fallbackTitle || rdoc.pid;
+                    const problemContent = pdoc?.content || body.fallbackContent || '';
                     const statusStr = STATUS_TEXT[rdoc.status] || `状态码 ${rdoc.status}`;
+
                     contextPrompt = `
-【当前上下文：用户提交的代码记录排查】
+========================================
+【当前上下文：用户提交的代码排查】
 - 题目 PID: ${rdoc.pid}
-- 题目标题: ${pdoc?.title || rdoc.pid}
-- 评测结果: ${statusStr}
-- 得分: ${rdoc.score ?? 0}
+- 题目标题: ${problemTitle}
+- 评测状态: ${statusStr}
+- 评测得分: ${rdoc.score ?? 0}
 - 编程语言: ${rdoc.lang}
-- 时间消耗: ${rdoc.time || 0} ms, 空间消耗: ${rdoc.memory || 0} KB
+- 耗时: ${rdoc.time || 0} ms, 内存: ${rdoc.memory || 0} KB
 ${rdoc.compilerText ? `\n【编译器报错信息/提示】:\n\`\`\`\n${rdoc.compilerText.slice(0, 2000)}\n\`\`\`` : ''}
-${rdoc.judgeTexts && Object.keys(rdoc.judgeTexts).length > 0 ? `\n【评测点简要提示】:\n${JSON.stringify(rdoc.judgeTexts).slice(0, 1000)}` : ''}
+${rdoc.judgeTexts && Object.keys(rdoc.judgeTexts).length > 0 ? `\n【评测点提示】:\n${JSON.stringify(rdoc.judgeTexts).slice(0, 1000)}` : ''}
 \n【用户提交的代码】:
-\`\`\`${rdoc.lang}
-${rdoc.code ? rdoc.code.slice(0, 5000) : '(无代码)'}
+\`\`\`${rdoc.lang || 'cpp'}
+${userCode ? userCode.slice(0, 6000) : '(未获取到用户代码)'}
 \`\`\`
-${pdoc?.content ? `\n【题面简述/限制】:\n时间限制: ${pdoc.time || 1000}ms, 空间限制: ${pdoc.memory || 262144}KB\n${pdoc.content.slice(0, 3000)}` : ''}
+${problemContent ? `\n【题面描述与约束】:\n时间限制: ${pdoc?.time || 1000}ms, 空间限制: ${pdoc?.memory || 262144}KB\n${problemContent.slice(0, 3000)}` : ''}
+========================================
 `;
                 }
             } else if (body.pid) {
-                const pdoc = await ProblemModel.get(domain, body.pid);
-                if (pdoc) {
-                    contextPrompt = `
+                const pdoc = await fetchProblemDoc(this.ctx, domain, body.pid);
+                const title = pdoc?.title || body.fallbackTitle || body.pid;
+                const content = pdoc?.content || body.fallbackContent || '';
+
+                contextPrompt = `
+========================================
 【当前上下文：题目详情】
-- 题目 PID: ${pdoc.pid}
-- 题目标题: ${pdoc.title}
-- 时间限制: ${pdoc.time || 1000} ms, 空间限制: ${pdoc.memory || 262144} KB
-- 题面描述与约束:
-${pdoc.content ? pdoc.content.slice(0, 4000) : '（无题面描述）'}
+- 题目 PID: ${body.pid}
+- 题目标题: ${title}
+- 时间限制: ${pdoc?.time || 1000} ms, 空间限制: ${pdoc?.memory || 262144} KB
+- 题目描述与约束:
+${content ? content.slice(0, 5000) : '(题面信息见上方标题)'}
+========================================
 `;
-                }
             }
         } catch (e) {
-            // 忽略上下文加载失败
+            // ignore
         }
 
         const systemMessage = {
             role: 'system',
-            content: `${config.systemPrompt || '你是一个算法竞赛助教。请仅就题目理解和解题思路提供帮助，不要直接给出完整代码。'}\n\n${contextPrompt}\n\n【核心规则】：作为助教，引导学生思考并分析算法时空复杂度与边界条件，严禁直接提供可直接 AC 的完整代码！`,
+            content: `${config.systemPrompt || '你是一个专业的算法竞赛助教。'}\n\n${contextPrompt}\n\n【核心规则】：
+1. 用户的提问是针对上方给出的题目与代码上下文进行的，请直接结合上下文解答用户的疑问，严禁再要求用户粘贴题目或代码！
+2. 遵循启发式教学：重点分析算法核心思想、时间/空间复杂度、边界特判或代码逻辑漏洞，严禁直接提供可直接 AC 的完整代码！`,
         };
 
-        // 过滤空消息（防止 GLM 报错）
         const userHistory = (body.messages || [])
             .filter((m) => m && typeof m.content === 'string' && m.content.trim().length > 0)
             .slice(-8)
@@ -185,7 +260,6 @@ ${pdoc.content ? pdoc.content.slice(0, 4000) : '（无题面描述）'}
         const res = koaCtx.res;
         const abortController = new AbortController();
 
-        // 监听响应流关闭（而非请求体关闭），避免 POST 数据接收完毕后被误杀
         res.on('close', () => {
             if (!res.writableEnded) {
                 abortController.abort();
@@ -193,7 +267,6 @@ ${pdoc.content ? pdoc.content.slice(0, 4000) : '（无题面描述）'}
         });
 
         try {
-            // 自动修剪 URL
             let baseUrl = (config.apiUrl || '').trim().replace(/\/+$/, '');
             if (baseUrl.endsWith('/chat/completions')) {
                 baseUrl = baseUrl.slice(0, -'/chat/completions'.length).replace(/\/+$/, '');
@@ -261,7 +334,7 @@ ${pdoc.content ? pdoc.content.slice(0, 4000) : '（无题面描述）'}
                                 res.write(`data: ${JSON.stringify({ delta })}\n\n`);
                             }
                         } catch {
-                            // 忽略单个 chunk 的 JSON 解析错误
+                            // ignore
                         }
                     }
                 }
@@ -295,8 +368,9 @@ export async function apply(ctx: Context) {
         that.UiContext.showAiFloatButton = true;
         that.UiContext.aiContext = {
             type: 'problem',
-            pid: that.pdoc?.pid,
-            domainId: that.args?.domainId || 'system',
+            pid: that.pdoc?.pid || that.pdoc?.docId || that.args?.pid,
+            title: that.pdoc?.title || '',
+            domainId: that.domainId || that.args?.domainId || 'system',
         };
     });
 
@@ -312,7 +386,7 @@ export async function apply(ctx: Context) {
             type: 'record',
             pid: rdoc.pid,
             rid: rdoc._id?.toString(),
-            domainId: that.args?.domainId || 'system',
+            domainId: that.domainId || that.args?.domainId || 'system',
         };
     });
 
