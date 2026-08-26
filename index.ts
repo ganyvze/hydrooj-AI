@@ -1,9 +1,26 @@
 import {
-    Context, Handler, param, PRIV, STATUS, Types,
+    Context, Handler, param, PRIV, PERM, STATUS, Types,
 } from 'hydrooj';
+import { ObjectId } from 'mongodb';
 import { AiConfig } from './model';
 
 const AiModel = global.Hydro.model.ai;
+const ProblemModel = (global.Hydro.model as any).problem;
+const RecordModel = (global.Hydro.model as any).record;
+
+const STATUS_TEXT: Record<number, string> = {
+    [STATUS.STATUS_WAITING]: '等待评测 (Waiting)',
+    [STATUS.STATUS_JUDGING]: '正在评测 (Judging)',
+    [STATUS.STATUS_ACCEPTED]: '通过 (Accepted)',
+    [STATUS.STATUS_WRONG_ANSWER]: '答案错误 (Wrong Answer / WA)',
+    [STATUS.STATUS_TIME_LIMIT_EXCEEDED]: '超出时间限制 (Time Limit Exceeded / TLE)',
+    [STATUS.STATUS_MEMORY_LIMIT_EXCEEDED]: '超出空间限制 (Memory Limit Exceeded / MLE)',
+    [STATUS.STATUS_RUNTIME_ERROR]: '运行时错误 (Runtime Error / RE)',
+    [STATUS.STATUS_COMPILE_ERROR]: '编译错误 (Compile Error / CE)',
+    [STATUS.STATUS_SYSTEM_ERROR]: '系统错误 (System Error / SE)',
+    [STATUS.STATUS_CANCELED]: '评测已取消 (Canceled)',
+    [STATUS.STATUS_ETC]: '其他错误 (ETC)',
+};
 
 class AiManageHandler extends Handler {
     async get() {
@@ -46,28 +63,234 @@ class AiManageHandler extends Handler {
             rateLimitWindow: Math.max(rateLimitWindow, 1),
             timeout: Math.min(Math.max(timeout, 1), 600),
         };
-        // Keep the stored key when the field is left empty, so that
-        // saving other settings doesn't wipe the credential.
         if (apiKey.trim()) patch.apiKey = apiKey.trim();
         await AiModel.saveConfig(this.ctx, patch);
         this.response.redirect = this.url('ai_manage');
     }
 }
 
+class AiChatHandler extends Handler {
+    async post(domainId: string) {
+        const body = (this.request.body || {}) as {
+            messages?: Array<{ role: string; content: string }>;
+            contextType?: 'problem' | 'record';
+            pid?: string | number;
+            rid?: string;
+            domainId?: string;
+        };
+
+        if (!this.user._id) {
+            this.response.status = 401;
+            this.response.body = { error: '请先登录后再使用 AI 助手功能' };
+            return;
+        }
+
+        const config = await AiModel.getConfig(this.ctx);
+        if (!config.enabled) {
+            this.response.status = 403;
+            this.response.body = { error: 'AI 助手功能已被管理员关闭' };
+            return;
+        }
+
+        if (!config.apiKey) {
+            this.response.status = 500;
+            this.response.body = { error: '系统尚未配置 AI API Key，请联系管理员' };
+            return;
+        }
+
+        // 限流检查
+        const limitCheck = await AiModel.checkRateLimit(this.ctx, this.user._id, config);
+        if (!limitCheck.ok) {
+            this.response.status = 429;
+            this.response.body = {
+                error: `调用过于频繁，请在 ${limitCheck.waitSeconds} 秒后再试（限流规则: ${config.rateLimit} 次 / ${config.rateLimitWindow} 分钟）`,
+            };
+            return;
+        }
+
+        const domain = domainId || body.domainId || 'system';
+        let contextPrompt = '';
+
+        // 装配上下文
+        try {
+            if (body.contextType === 'record' && body.rid) {
+                const rdoc = await RecordModel.get(domain, new ObjectId(body.rid));
+                if (rdoc && (rdoc.uid === this.user._id || this.user.hasPerm(PERM.PERM_VIEW_RECORD))) {
+                    const pdoc = await ProblemModel.get(domain, rdoc.pid);
+                    const statusStr = STATUS_TEXT[rdoc.status] || `状态码 ${rdoc.status}`;
+                    contextPrompt = `
+【当前上下文：用户提交的代码记录排查】
+- 题目 PID: ${rdoc.pid}
+- 题目标题: ${pdoc?.title || rdoc.pid}
+- 评测结果: ${statusStr}
+- 得分: ${rdoc.score ?? 0}
+- 编程语言: ${rdoc.lang}
+- 时间消耗: ${rdoc.time || 0} ms, 空间消耗: ${rdoc.memory || 0} KB
+${rdoc.compilerText ? `\n【编译器报错信息/提示】:\n\`\`\`\n${rdoc.compilerText.slice(0, 2000)}\n\`\`\`` : ''}
+${rdoc.judgeTexts && Object.keys(rdoc.judgeTexts).length > 0 ? `\n【评测点简要提示】:\n${JSON.stringify(rdoc.judgeTexts).slice(0, 1000)}` : ''}
+\n【用户提交的代码】:
+\`\`\`${rdoc.lang}
+${rdoc.code ? rdoc.code.slice(0, 5000) : '(无代码)'}
+\`\`\`
+${pdoc?.content ? `\n【题面简述/限制】:\n时间限制: ${pdoc.time || 1000}ms, 空间限制: ${pdoc.memory || 262144}KB\n${pdoc.content.slice(0, 3000)}` : ''}
+`;
+                }
+            } else if (body.pid) {
+                const pdoc = await ProblemModel.get(domain, body.pid);
+                if (pdoc) {
+                    contextPrompt = `
+【当前上下文：题目详情】
+- 题目 PID: ${pdoc.pid}
+- 题目标题: ${pdoc.title}
+- 时间限制: ${pdoc.time || 1000} ms, 空间限制: ${pdoc.memory || 262144} KB
+- 题面描述与约束:
+${pdoc.content ? pdoc.content.slice(0, 4000) : '（无题面描述）'}
+`;
+                }
+            }
+        } catch (e) {
+            // 忽略上下文加载失败，保证基本对话可用
+        }
+
+        const systemMessage = {
+            role: 'system',
+            content: `${config.systemPrompt || '你是一个算法竞赛助教。请仅就题目理解和解题思路提供帮助，不要直接给出完整代码。'}\n\n${contextPrompt}\n\n【核心规则】：作为助教，引导学生思考并分析算法时空复杂度与边界条件，严禁直接提供可直接 AC 的完整代码！`,
+        };
+
+        const userHistory = (body.messages || []).slice(-8).map((m) => ({
+            role: m.role === 'user' ? 'user' : 'assistant',
+            content: String(m.content || ''),
+        }));
+
+        const openaiMessages = [systemMessage, ...userHistory];
+
+        // 启动 SSE 流式响应
+        const koaCtx = (this as any).context;
+        koaCtx.status = 200;
+        koaCtx.set({
+            'Content-Type': 'text/event-stream; charset=utf-8',
+            'Cache-Control': 'no-cache, no-transform',
+            'Connection': 'keep-alive',
+            'X-Accel-Buffering': 'no',
+        });
+        if (typeof koaCtx.flushHeaders === 'function') {
+            koaCtx.flushHeaders();
+        }
+        koaCtx.respond = false;
+
+        const res = koaCtx.res;
+        const req = koaCtx.req;
+        const abortController = new AbortController();
+
+        req.on('close', () => {
+            abortController.abort();
+        });
+
+        try {
+            const apiUrl = `${config.apiUrl.replace(/\/+$/, '')}/chat/completions`;
+            const timeoutSignal = AbortSignal.timeout((config.timeout || 60) * 1000);
+            
+            // 合并超时信号与请求中断信号
+            const combinedSignal = abortController.signal;
+            timeoutSignal.addEventListener('abort', () => abortController.abort(), { once: true });
+
+            const upstreamRes = await fetch(apiUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${config.apiKey}`,
+                },
+                body: JSON.stringify({
+                    model: config.model || 'gpt-4o-mini',
+                    messages: openaiMessages,
+                    temperature: config.temperature ?? 0.7,
+                    max_tokens: config.maxTokens ?? 1024,
+                    stream: true,
+                }),
+                signal: combinedSignal,
+            });
+
+            if (!upstreamRes.ok) {
+                const errText = await upstreamRes.text();
+                res.write(`data: ${JSON.stringify({ error: `上游 AI 返回异常 (${upstreamRes.status}): ${errText}` })}\n\n`);
+                res.write('data: [DONE]\n\n');
+                res.end();
+                return;
+            }
+
+            if (!upstreamRes.body) {
+                res.write(`data: ${JSON.stringify({ error: '上游 AI 服务未返回数据流' })}\n\n`);
+                res.write('data: [DONE]\n\n');
+                res.end();
+                return;
+            }
+
+            const reader = upstreamRes.body.getReader();
+            const decoder = new TextDecoder('utf-8');
+            let buffer = '';
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
+
+                for (const line of lines) {
+                    const trimmed = line.trim();
+                    if (!trimmed || trimmed.startsWith(':')) continue;
+                    if (trimmed === 'data: [DONE]') {
+                        res.write('data: [DONE]\n\n');
+                        continue;
+                    }
+                    if (trimmed.startsWith('data: ')) {
+                        try {
+                            const parsed = JSON.parse(trimmed.slice(6));
+                            const delta = parsed.choices?.[0]?.delta?.content || '';
+                            if (delta) {
+                                res.write(`data: ${JSON.stringify({ delta })}\n\n`);
+                            }
+                        } catch {
+                            // 忽略单个 chunk 的 JSON 解析错误
+                        }
+                    }
+                }
+            }
+
+            res.write('data: [DONE]\n\n');
+            res.end();
+        } catch (err: any) {
+            if (err.name === 'AbortError') {
+                res.end();
+                return;
+            }
+            res.write(`data: ${JSON.stringify({ error: `请求异常: ${err.message || String(err)}` })}\n\n`);
+            res.write('data: [DONE]\n\n');
+            res.end();
+        }
+    }
+}
+
 export async function apply(ctx: Context) {
     ctx.Route('ai_manage', '/manage/ai', AiManageHandler, PRIV.PRIV_MANAGE_ALL_DOMAIN);
+    ctx.Route('ai_chat', '/api/ai/chat', AiChatHandler);
     ctx.injectUI('ControlPanel', 'ai_manage');
 
-    // Show the AI float ball on problem detail pages.
+    // 题目详情页挂载 AI
     ctx.on('handler/after/ProblemDetail#get', async (that) => {
         const config = await AiModel.getConfig(ctx);
         if (!config.enabled) return;
         if (!that.user._id) return;
         that.UiContext.showAiFloatButton = true;
+        that.UiContext.aiContext = {
+            type: 'problem',
+            pid: that.pdoc?.pid,
+            domainId: that.args?.domainId || 'system',
+        };
     });
 
-    // Show the AI float ball on the user's own record pages,
-    // except for Accepted and System Error submissions.
+    // 用户自己的提交记录页挂载 AI（排除 AC 与 SE）
     ctx.on('handler/after/RecordDetail#get', async (that) => {
         const config = await AiModel.getConfig(ctx);
         if (!config.enabled) return;
@@ -76,6 +299,12 @@ export async function apply(ctx: Context) {
         if (rdoc.uid !== that.user._id) return;
         if ([STATUS.STATUS_ACCEPTED, STATUS.STATUS_SYSTEM_ERROR].includes(rdoc.status)) return;
         that.UiContext.showAiFloatButton = true;
+        that.UiContext.aiContext = {
+            type: 'record',
+            pid: rdoc.pid,
+            rid: rdoc._id?.toString(),
+            domainId: that.args?.domainId || 'system',
+        };
     });
 
     ctx.i18n.load('zh', {
@@ -100,28 +329,5 @@ export async function apply(ctx: Context) {
         'Rate limit window (minutes)': '限流窗口（分钟）',
         'Timeout (seconds)': '请求超时（秒）',
         Save: '保存',
-    });
-    ctx.i18n.load('en', {
-        ai_manage: 'AI Manage',
-        'AI Settings': 'AI Settings',
-        'Enable AI features': 'Enable AI features',
-        'API Base URL': 'API Base URL',
-        'OpenAI-compatible API base URL, e.g. https://api.openai.com/v1': 'OpenAI-compatible API base URL, e.g. https://api.openai.com/v1',
-        'API Key': 'API Key',
-        'Leave empty to keep the saved key': 'Leave empty to keep the saved key',
-        'Key saved': 'Key saved',
-        'No key saved': 'No key saved',
-        Model: 'Model',
-        'Model name, e.g. gpt-4o-mini': 'Model name, e.g. gpt-4o-mini',
-        'System prompt': 'System prompt',
-        'Prepended to every conversation': 'Prepended to every conversation',
-        Temperature: 'Temperature',
-        'Sampling temperature, 0 - 2': 'Sampling temperature, 0 - 2',
-        'Max tokens': 'Max tokens',
-        'Rate limit': 'Rate limit',
-        'Max calls per user within the window': 'Max calls per user within the window',
-        'Rate limit window (minutes)': 'Rate limit window (minutes)',
-        'Timeout (seconds)': 'Timeout (seconds)',
-        Save: 'Save',
     });
 }

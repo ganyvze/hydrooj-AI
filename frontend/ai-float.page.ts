@@ -16,9 +16,8 @@ const css = `
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 700;
-  letter-spacing: 0.5px;
   cursor: grab;
   user-select: none;
   touch-action: none;
@@ -39,7 +38,7 @@ const css = `
   background: #1d4ed8;
 }
 
-/* ==================== 遮罩层 (移动端/遮罩效果) ==================== */
+/* ==================== 遮罩层 ==================== */
 .ai-drawer-backdrop {
   position: fixed;
   inset: 0;
@@ -61,7 +60,7 @@ const css = `
   top: 0;
   right: 0;
   bottom: 0;
-  width: 420px;
+  width: 440px;
   max-width: 100vw;
   height: 100vh;
   z-index: 9999;
@@ -166,7 +165,6 @@ const css = `
   scroll-behavior: smooth;
 }
 
-/* 自定义滚动条 */
 .ai-body::-webkit-scrollbar {
   width: 6px;
 }
@@ -215,6 +213,7 @@ const css = `
   color: #2563eb;
   cursor: pointer;
   transition: all 0.15s ease;
+  user-select: none;
 }
 .ai-prompt-chip:hover {
   border-color: #2563eb;
@@ -252,7 +251,7 @@ const css = `
 .ai-msg-content-wrap {
   display: flex;
   flex-direction: column;
-  max-width: calc(100% - 44px);
+  max-width: calc(100% - 40px);
 }
 .ai-msg.user .ai-msg-content-wrap {
   align-items: flex-end;
@@ -263,7 +262,6 @@ const css = `
   font-size: 13.5px;
   line-height: 1.6;
   word-break: break-word;
-  white-space: pre-wrap;
 }
 .ai-msg.assistant .ai-msg-bubble {
   background: #f3f4f6;
@@ -274,31 +272,71 @@ const css = `
   background: #2563eb;
   color: #ffffff;
   border-top-right-radius: 2px;
+  white-space: pre-wrap;
 }
 
-/* 打字动画指示器 */
-.ai-typing {
-  display: inline-flex;
+/* Markdown 与代码块样式 */
+.ai-msg-bubble h3, .ai-msg-bubble h4, .ai-msg-bubble h5 {
+  margin: 8px 0 4px 0;
+  font-weight: 600;
+}
+.ai-msg-bubble p {
+  margin: 4px 0;
+}
+.ai-inline-code {
+  background: rgba(0, 0, 0, 0.06);
+  padding: 2px 5px;
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12.5px;
+  color: #b91c1c;
+}
+.ai-code-block {
+  background: #1e293b;
+  border-radius: 8px;
+  margin: 8px 0;
+  overflow: hidden;
+  color: #f8fafc;
+}
+.ai-code-header {
+  display: flex;
+  justify-content: space-between;
   align-items: center;
-  gap: 4px;
-  padding: 8px 12px;
-  background: #f3f4f6;
-  border-radius: 12px;
-  border-top-left-radius: 2px;
-  width: fit-content;
+  padding: 4px 10px;
+  background: #0f172a;
+  color: #94a3b8;
+  font-size: 11px;
 }
-.ai-dot {
-  width: 6px;
-  height: 6px;
-  background: #9ca3af;
-  border-radius: 50%;
-  animation: aiBounce 1.4s infinite ease-in-out both;
+.ai-code-block pre {
+  margin: 0;
+  padding: 10px 12px;
+  overflow-x: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.45;
 }
-.ai-dot:nth-child(1) { animation-delay: -0.32s; }
-.ai-dot:nth-child(2) { animation-delay: -0.16s; }
-@keyframes aiBounce {
-  0%, 80%, 100% { transform: scale(0); }
-  40% { transform: scale(1); }
+.ai-copy-btn {
+  border: none;
+  background: #334155;
+  color: #e2e8f0;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.ai-copy-btn:hover {
+  background: #475569;
+}
+.ai-quote {
+  border-left: 3px solid #3b82f6;
+  margin: 6px 0;
+  padding-left: 8px;
+  color: #4b5563;
+}
+.ai-list-item {
+  margin-left: 18px;
+  list-style-type: disc;
 }
 
 /* ==================== 底部输入区域 ==================== */
@@ -356,6 +394,11 @@ const css = `
   background: #9ca3af;
   cursor: not-allowed;
   opacity: 0.6;
+}
+.ai-send-btn.stop {
+  background: #ef4444 !important;
+  opacity: 1 !important;
+  cursor: pointer !important;
 }
 .ai-send-btn:not(:disabled):hover {
   background: #1d4ed8;
@@ -426,8 +469,13 @@ const css = `
   background: #27272a;
   color: #f4f4f5;
 }
-.theme--dark .ai-typing {
-  background: #27272a;
+.theme--dark .ai-inline-code {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fca5a5;
+}
+.theme--dark .ai-quote {
+  color: #9ca3af;
+  border-left-color: #60a5fa;
 }
 .theme--dark .ai-footer {
   background: #18181b;
@@ -450,7 +498,6 @@ const css = `
 }
 `;
 
-// SVG 图标集
 const ICONS = {
   robot: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>`,
   sparkle: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/></svg>`,
@@ -458,6 +505,7 @@ const ICONS = {
   trash: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>`,
   close: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`,
   send: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>`,
+  stop: `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect width="14" height="14" x="5" y="5" rx="2"/></svg>`,
 };
 
 interface ChatMessage {
@@ -469,13 +517,71 @@ function clamp(v: number, min: number, max: number) {
   return Math.min(Math.max(v, min), max);
 }
 
+function escapeHtml(str: string) {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function renderMarkdown(raw: string): string {
+  if (!raw) return '';
+  const codeBlocks: string[] = [];
+
+  let text = raw.replace(/```([a-zA-Z0-9_-]*)\n([\s\S]*?)```/g, (_, lang, code) => {
+    const index = codeBlocks.length;
+    const safeCode = escapeHtml(code.trimEnd());
+    const langLabel = escapeHtml(lang || 'code');
+    const blockHtml = `
+<div class="ai-code-block">
+  <div class="ai-code-header">
+    <span>${langLabel}</span>
+    <button class="ai-copy-btn" data-code="${encodeURIComponent(code.trimEnd())}">复制</button>
+  </div>
+  <pre><code>${safeCode}</code></pre>
+</div>`;
+    codeBlocks.push(blockHtml);
+    return `__CODE_BLOCK_${index}__`;
+  });
+
+  text = escapeHtml(text);
+  text = text.replace(/`([^`\n]+)`/g, '<code class="ai-inline-code">$1</code>');
+  text = text.replace(/^### (.*$)/gim, '<h5>$1</h5>');
+  text = text.replace(/^## (.*$)/gim, '<h4>$1</h4>');
+  text = text.replace(/^# (.*$)/gim, '<h3>$1</h3>');
+  text = text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  text = text.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+  text = text.replace(/^> (.*$)/gim, '<blockquote class="ai-quote">$1</blockquote>');
+  text = text.replace(/^\s*[-*]\s+(.*$)/gim, '<li class="ai-list-item">$1</li>');
+  text = text.replace(/\n/g, '<br/>');
+  text = text.replace(/__CODE_BLOCK_(\d+)__/g, (_, idx) => codeBlocks[Number(idx)] || '');
+
+  return text;
+}
+
 function setupAiAssistantUI() {
-  // 1. 注入样式
   const style = document.createElement('style');
   style.textContent = css;
   document.head.appendChild(style);
 
-  // 2. 创建遮罩层与侧边栏结构
+  const aiCtx = UiContext.aiContext || { type: 'problem' };
+  const isRecordPage = aiCtx.type === 'record';
+
+  const welcomePrompts = isRecordPage
+    ? `
+      <div class="ai-prompt-chip" data-prompt="请帮我分析这份代码哪里可能存在逻辑漏洞或边界问题？">🐞 分析代码疑点</div>
+      <div class="ai-prompt-chip" data-prompt="针对当前未通过的状态，有什么推荐的调试排查方向？">🔍 调试排查建议</div>
+      <div class="ai-prompt-chip" data-prompt="如何优化当前代码的时间或空间复杂度？">⚡ 复杂度优化提示</div>
+    `
+    : `
+      <div class="ai-prompt-chip" data-prompt="请用通俗的语言解释这道题目的核心含义与输入约束。">💡 解释题目意思</div>
+      <div class="ai-prompt-chip" data-prompt="这道题有什么解题思路？可以给一些关键算法方向的提示吗？">🎯 解题思路提示</div>
+      <div class="ai-prompt-chip" data-prompt="如何分析这道题的数据规模与时空复杂度？">⚡ 复杂度分析</div>
+      <div class="ai-prompt-chip" data-prompt="这道题有哪些容易遗漏的特殊边界情况？">⚠️ 边界特判提醒</div>
+    `;
+
   const backdrop = document.createElement('div');
   backdrop.className = 'ai-drawer-backdrop';
 
@@ -486,7 +592,7 @@ function setupAiAssistantUI() {
       <div class="ai-header-info">
         <div class="ai-avatar-icon">${ICONS.robot}</div>
         <div class="ai-title-wrap">
-          <span class="ai-title">AI 助教</span>
+          <span class="ai-title">AI</span>
           <span class="ai-status"><span class="ai-status-dot"></span>已连接</span>
         </div>
       </div>
@@ -498,17 +604,13 @@ function setupAiAssistantUI() {
     <div class="ai-body" id="ai-body">
       <div class="ai-welcome-card" id="ai-welcome">
         <h4>${ICONS.sparkle} 你好！我是你的算法竞赛助教</h4>
-        <div>我可以为你提供题目思路分析、代码疑点排查及时间复杂度优化建议（不会直接给出完整 AC 代码）。</div>
-        <div class="ai-prompts-group">
-          <div class="ai-prompt-chip" data-prompt="请用通俗的语言解释这道题目的含义与核心约束。">💡 解释题目意思</div>
-          <div class="ai-prompt-chip" data-prompt="这道题有什么解题思路？可以给一些关键算法提示吗？">🎯 解题思路提示</div>
-          <div class="ai-prompt-chip" data-prompt="如何分析这道题的数据范围和时空复杂度？">⚡ 复杂度分析</div>
-        </div>
+        <div>${isRecordPage ? '已自动载入你本次提交的代码与评测状态。请问需要排查哪方面的疑问？' : '已自动载入当前题面信息。需要思路分析或复杂度建议随时问我！'}</div>
+        <div class="ai-prompts-group">${welcomePrompts}</div>
       </div>
     </div>
     <div class="ai-footer">
       <div class="ai-input-box">
-        <textarea class="ai-textarea" id="ai-textarea" placeholder="向 AI 助教提问..." rows="1"></textarea>
+        <textarea class="ai-textarea" id="ai-textarea" placeholder="向 AI 提问..." rows="1"></textarea>
         <button class="ai-send-btn" id="ai-send-btn" disabled title="发送">${ICONS.send}</button>
       </div>
       <div class="ai-footer-hint">Enter 发送，Shift + Enter 换行</div>
@@ -518,7 +620,6 @@ function setupAiAssistantUI() {
   document.body.appendChild(backdrop);
   document.body.appendChild(sidebar);
 
-  // 3. 创建可拖拽悬浮球
   const ball = document.createElement('div');
   ball.className = 'ai-float-ball';
   ball.innerHTML = `${ICONS.sparkle}&nbsp;AI`;
@@ -526,7 +627,6 @@ function setupAiAssistantUI() {
   ball.style.top = `${window.innerHeight - BALL_SIZE - 96}px`;
   document.body.appendChild(ball);
 
-  // 4. 状态与事件处理
   let isOpen = false;
   let dragging = false;
   let hasMoved = false;
@@ -535,7 +635,10 @@ function setupAiAssistantUI() {
   let originLeft = 0;
   let originTop = 0;
 
+  let isGenerating = false;
+  let currentAbortController: AbortController | null = null;
   const messages: ChatMessage[] = [];
+
   const bodyEl = sidebar.querySelector('#ai-body') as HTMLDivElement;
   const textarea = sidebar.querySelector('#ai-textarea') as HTMLTextAreaElement;
   const sendBtn = sidebar.querySelector('#ai-send-btn') as HTMLButtonElement;
@@ -556,7 +659,6 @@ function setupAiAssistantUI() {
     }
   }
 
-  // 悬浮球拖拽与点击判定
   ball.addEventListener('pointerdown', (ev) => {
     dragging = true;
     hasMoved = false;
@@ -571,9 +673,7 @@ function setupAiAssistantUI() {
     if (!dragging) return;
     const dx = ev.clientX - startX;
     const dy = ev.clientY - startY;
-    if (Math.hypot(dx, dy) > 5) {
-      hasMoved = true;
-    }
+    if (Math.hypot(dx, dy) > 5) hasMoved = true;
     const left = clamp(originLeft + dx, EDGE_MARGIN, window.innerWidth - BALL_SIZE - EDGE_MARGIN);
     const top = clamp(originTop + dy, EDGE_MARGIN, window.innerHeight - BALL_SIZE - EDGE_MARGIN);
     ball.style.left = `${left}px`;
@@ -584,16 +684,13 @@ function setupAiAssistantUI() {
     if (!dragging) return;
     dragging = false;
     ball.releasePointerCapture(ev.pointerId);
-    if (!hasMoved) {
-      toggleSidebar();
-    }
+    if (!hasMoved) toggleSidebar();
   });
 
   ball.addEventListener('pointercancel', () => {
     dragging = false;
   });
 
-  // 窗口大小变动重置位置
   window.addEventListener('resize', () => {
     const left = clamp(ball.offsetLeft, EDGE_MARGIN, window.innerWidth - BALL_SIZE - EDGE_MARGIN);
     const top = clamp(ball.offsetTop, EDGE_MARGIN, window.innerHeight - BALL_SIZE - EDGE_MARGIN);
@@ -601,21 +698,31 @@ function setupAiAssistantUI() {
     ball.style.top = `${top}px`;
   });
 
-  // 关闭交互
   closeBtn.addEventListener('click', () => toggleSidebar(false));
   backdrop.addEventListener('click', () => toggleSidebar(false));
   window.addEventListener('keydown', (ev) => {
-    if (ev.key === 'Escape' && isOpen) {
-      toggleSidebar(false);
-    }
+    if (ev.key === 'Escape' && isOpen) toggleSidebar(false);
   });
 
-  // 消息渲染
-  function appendMessage(role: 'assistant' | 'user', text: string) {
+  function updateSendButton() {
+    if (isGenerating) {
+      sendBtn.innerHTML = ICONS.stop;
+      sendBtn.title = '停止生成';
+      sendBtn.classList.add('stop');
+      sendBtn.disabled = false;
+    } else {
+      sendBtn.innerHTML = ICONS.send;
+      sendBtn.title = '发送';
+      sendBtn.classList.remove('stop');
+      sendBtn.disabled = !textarea.value.trim();
+    }
+  }
+
+  function appendUserMessage(text: string) {
     const msgEl = document.createElement('div');
-    msgEl.className = `ai-msg ${role}`;
+    msgEl.className = 'ai-msg user';
     msgEl.innerHTML = `
-      <div class="ai-msg-avatar">${role === 'assistant' ? ICONS.robot : ICONS.user}</div>
+      <div class="ai-msg-avatar">${ICONS.user}</div>
       <div class="ai-msg-content-wrap">
         <div class="ai-msg-bubble">${escapeHtml(text)}</div>
       </div>
@@ -624,82 +731,159 @@ function setupAiAssistantUI() {
     bodyEl.scrollTop = bodyEl.scrollHeight;
   }
 
-  function showTyping() {
-    const typingEl = document.createElement('div');
-    typingEl.className = 'ai-msg assistant';
-    typingEl.id = 'ai-typing-indicator';
-    typingEl.innerHTML = `
+  function createAssistantMessageElement() {
+    const msgEl = document.createElement('div');
+    msgEl.className = 'ai-msg assistant';
+    msgEl.innerHTML = `
       <div class="ai-msg-avatar">${ICONS.robot}</div>
       <div class="ai-msg-content-wrap">
-        <div class="ai-typing">
-          <div class="ai-dot"></div>
-          <div class="ai-dot"></div>
-          <div class="ai-dot"></div>
-        </div>
+        <div class="ai-msg-bubble"></div>
       </div>
     `;
-    bodyEl.appendChild(typingEl);
+    bodyEl.appendChild(msgEl);
     bodyEl.scrollTop = bodyEl.scrollHeight;
+    return msgEl.querySelector('.ai-msg-bubble') as HTMLDivElement;
   }
 
-  function removeTyping() {
-    const el = bodyEl.querySelector('#ai-typing-indicator');
-    if (el) el.remove();
-  }
-
-  function escapeHtml(str: string) {
-    return str
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#039;');
-  }
-
-  // 发送消息交互 (Mock 响应)
   async function handleSend() {
+    if (isGenerating) {
+      currentAbortController?.abort();
+      return;
+    }
+
     const content = textarea.value.trim();
     if (!content) return;
 
     messages.push({ role: 'user', content });
-    appendMessage('user', content);
+    appendUserMessage(content);
+
     textarea.value = '';
     textarea.style.height = '24px';
-    sendBtn.disabled = true;
 
-    // 模拟 AI 打字回复效果
-    showTyping();
-    setTimeout(() => {
-      removeTyping();
-      const mockReply = `收到你的提问："${content}"。\n\n当前 AI 界面已就绪。连接后台 API 后，我将在此为你实时提供该题目的解题思路与分析！`;
-      messages.push({ role: 'assistant', content: mockReply });
-      appendMessage('assistant', mockReply);
-    }, 900);
+    isGenerating = true;
+    updateSendButton();
+
+    const assistantMsg: ChatMessage = { role: 'assistant', content: '' };
+    messages.push(assistantMsg);
+    const bubbleEl = createAssistantMessageElement();
+
+    currentAbortController = new AbortController();
+
+    try {
+      const res = await fetch('/api/ai/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: messages.slice(0, -1),
+          contextType: aiCtx.type,
+          pid: aiCtx.pid,
+          rid: aiCtx.rid,
+          domainId: aiCtx.domainId,
+        }),
+        signal: currentAbortController.signal,
+      });
+
+      if (!res.ok) {
+        let errStr = `HTTP ${res.status}`;
+        try {
+          const json = await res.json();
+          if (json.error) errStr = json.error;
+        } catch {
+          errStr = await res.text();
+        }
+        assistantMsg.content = `⚠️ **请求失败**：${errStr}`;
+        bubbleEl.innerHTML = renderMarkdown(assistantMsg.content);
+        return;
+      }
+
+      if (!res.body) {
+        assistantMsg.content = '⚠️ **错误**：未能获取到 AI 服务响应流';
+        bubbleEl.innerHTML = renderMarkdown(assistantMsg.content);
+        return;
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed.startsWith(':')) continue;
+          if (trimmed === 'data: [DONE]') continue;
+          if (trimmed.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(trimmed.slice(6));
+              if (data.error) {
+                assistantMsg.content += `\n\n⚠️ **错误**：${data.error}`;
+              } else if (data.delta) {
+                assistantMsg.content += data.delta;
+              }
+              bubbleEl.innerHTML = renderMarkdown(assistantMsg.content);
+              bodyEl.scrollTop = bodyEl.scrollHeight;
+            } catch {
+              // 忽略解析片段异常
+            }
+          }
+        }
+      }
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        assistantMsg.content += '\n\n*（已停止生成）*';
+      } else {
+        assistantMsg.content = `⚠️ **网络异常**：${err.message || '连接 AI 服务失败'}`;
+      }
+      bubbleEl.innerHTML = renderMarkdown(assistantMsg.content);
+    } finally {
+      isGenerating = false;
+      currentAbortController = null;
+      updateSendButton();
+      bodyEl.scrollTop = bodyEl.scrollHeight;
+    }
   }
 
   // 快捷问题点击
   bodyEl.addEventListener('click', (ev) => {
-    const target = (ev.target as HTMLElement).closest('.ai-prompt-chip') as HTMLElement;
-    if (!target) return;
-    const prompt = target.getAttribute('data-prompt');
-    if (prompt) {
-      textarea.value = prompt;
-      textarea.dispatchEvent(new Event('input'));
-      handleSend();
+    const chip = (ev.target as HTMLElement).closest('.ai-prompt-chip') as HTMLElement;
+    if (chip) {
+      const prompt = chip.getAttribute('data-prompt');
+      if (prompt && !isGenerating) {
+        textarea.value = prompt;
+        handleSend();
+      }
+    }
+
+    // 复制代码块
+    const copyBtn = (ev.target as HTMLElement).closest('.ai-copy-btn') as HTMLButtonElement;
+    if (copyBtn) {
+      const code = decodeURIComponent(copyBtn.getAttribute('data-code') || '');
+      navigator.clipboard.writeText(code).then(() => {
+        const originText = copyBtn.textContent;
+        copyBtn.textContent = '已复制 ✓';
+        setTimeout(() => {
+          copyBtn.textContent = originText;
+        }, 1500);
+      });
     }
   });
 
-  // 输入框自适应高度与按键监听
   textarea.addEventListener('input', () => {
     textarea.style.height = 'auto';
     textarea.style.height = `${Math.min(textarea.scrollHeight, 120)}px`;
-    sendBtn.disabled = !textarea.value.trim();
+    updateSendButton();
   });
 
   textarea.addEventListener('keydown', (ev) => {
     if (ev.key === 'Enter' && !ev.shiftKey) {
       ev.preventDefault();
-      if (!sendBtn.disabled) {
+      if (!isGenerating && textarea.value.trim()) {
         handleSend();
       }
     }
@@ -707,15 +891,15 @@ function setupAiAssistantUI() {
 
   sendBtn.addEventListener('click', handleSend);
 
-  // 清空对话
   clearBtn.addEventListener('click', () => {
+    if (isGenerating) currentAbortController?.abort();
     messages.length = 0;
     bodyEl.innerHTML = '';
     const welcome = document.createElement('div');
     welcome.className = 'ai-welcome-card';
     welcome.innerHTML = `
       <h4>${ICONS.sparkle} 对话已清空</h4>
-      <div>有新的疑问可以随时提出，祝你刷题愉快！</div>
+      <div>${isRecordPage ? '针对本次提交记录有新的疑问可以随时提出。' : '对本题有新的疑问可以随时提出。'}</div>
     `;
     bodyEl.appendChild(welcome);
   });
