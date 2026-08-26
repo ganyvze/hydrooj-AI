@@ -93,7 +93,7 @@ class AiChatHandler extends Handler {
 
         if (!config.apiKey) {
             this.response.status = 500;
-            this.response.body = { error: '系统尚未配置 AI API Key，请联系管理员' };
+            this.response.body = { error: '系统尚未配置 AI API Key，请联系管理员在后台设置' };
             return;
         }
 
@@ -149,7 +149,7 @@ ${pdoc.content ? pdoc.content.slice(0, 4000) : '（无题面描述）'}
                 }
             }
         } catch (e) {
-            // 忽略上下文解析失败，保证基础对话可用
+            // 忽略上下文加载失败
         }
 
         const systemMessage = {
@@ -157,10 +157,14 @@ ${pdoc.content ? pdoc.content.slice(0, 4000) : '（无题面描述）'}
             content: `${config.systemPrompt || '你是一个算法竞赛助教。请仅就题目理解和解题思路提供帮助，不要直接给出完整代码。'}\n\n${contextPrompt}\n\n【核心规则】：作为助教，引导学生思考并分析算法时空复杂度与边界条件，严禁直接提供可直接 AC 的完整代码！`,
         };
 
-        const userHistory = (body.messages || []).slice(-8).map((m) => ({
-            role: m.role === 'user' ? 'user' : 'assistant',
-            content: String(m.content || ''),
-        }));
+        // 过滤空消息（防止 GLM 报错）
+        const userHistory = (body.messages || [])
+            .filter((m) => m && typeof m.content === 'string' && m.content.trim().length > 0)
+            .slice(-8)
+            .map((m) => ({
+                role: m.role === 'user' ? 'user' : 'assistant',
+                content: m.content.trim(),
+            }));
 
         const openaiMessages = [systemMessage, ...userHistory];
 
@@ -179,15 +183,23 @@ ${pdoc.content ? pdoc.content.slice(0, 4000) : '（无题面描述）'}
         koaCtx.respond = false;
 
         const res = koaCtx.res;
-        const req = koaCtx.req;
         const abortController = new AbortController();
 
-        req.on('close', () => {
-            abortController.abort();
+        // 监听响应流关闭（而非请求体关闭），避免 POST 数据接收完毕后被误杀
+        res.on('close', () => {
+            if (!res.writableEnded) {
+                abortController.abort();
+            }
         });
 
         try {
-            const apiUrl = `${config.apiUrl.replace(/\/+$/, '')}/chat/completions`;
+            // 自动修剪 URL
+            let baseUrl = (config.apiUrl || '').trim().replace(/\/+$/, '');
+            if (baseUrl.endsWith('/chat/completions')) {
+                baseUrl = baseUrl.slice(0, -'/chat/completions'.length).replace(/\/+$/, '');
+            }
+            const apiUrl = `${baseUrl}/chat/completions`;
+
             const timeoutSignal = AbortSignal.timeout((config.timeout || 60) * 1000);
             timeoutSignal.addEventListener('abort', () => abortController.abort(), { once: true });
 
@@ -198,7 +210,7 @@ ${pdoc.content ? pdoc.content.slice(0, 4000) : '（无题面描述）'}
                     Authorization: `Bearer ${config.apiKey}`,
                 },
                 body: JSON.stringify({
-                    model: config.model || 'gpt-4o-mini',
+                    model: config.model || 'glm-4-flash',
                     messages: openaiMessages,
                     temperature: config.temperature ?? 0.7,
                     max_tokens: config.maxTokens ?? 1024,
@@ -249,7 +261,7 @@ ${pdoc.content ? pdoc.content.slice(0, 4000) : '（无题面描述）'}
                                 res.write(`data: ${JSON.stringify({ delta })}\n\n`);
                             }
                         } catch {
-                            // 忽略单个 chunk 的解析异常
+                            // 忽略单个 chunk 的 JSON 解析错误
                         }
                     }
                 }
@@ -258,13 +270,15 @@ ${pdoc.content ? pdoc.content.slice(0, 4000) : '（无题面描述）'}
             res.write('data: [DONE]\n\n');
             res.end();
         } catch (err: any) {
-            if (err.name === 'AbortError') {
+            if (err.name === 'AbortError' && !res.writableEnded) {
                 res.end();
                 return;
             }
-            res.write(`data: ${JSON.stringify({ error: `请求异常: ${err.message || String(err)}` })}\n\n`);
-            res.write('data: [DONE]\n\n');
-            res.end();
+            if (!res.writableEnded) {
+                res.write(`data: ${JSON.stringify({ error: `请求异常: ${err.message || String(err)}` })}\n\n`);
+                res.write('data: [DONE]\n\n');
+                res.end();
+            }
         }
     }
 }
@@ -274,7 +288,6 @@ export async function apply(ctx: Context) {
     ctx.Route('ai_chat', '/api/ai/chat', AiChatHandler);
     ctx.injectUI('ControlPanel', 'ai_manage');
 
-    // 题目详情页挂载 AI
     ctx.on('handler/after/ProblemDetail#get', async (that) => {
         const config = await AiModel.getConfig(ctx);
         if (!config.enabled) return;
@@ -287,7 +300,6 @@ export async function apply(ctx: Context) {
         };
     });
 
-    // 用户自己的提交记录页挂载 AI（排除 AC 与 SE）
     ctx.on('handler/after/RecordDetail#get', async (that) => {
         const config = await AiModel.getConfig(ctx);
         if (!config.enabled) return;

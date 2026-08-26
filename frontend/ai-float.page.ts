@@ -603,7 +603,7 @@ function setupAiAssistantUI() {
     </div>
     <div class="ai-body" id="ai-body">
       <div class="ai-welcome-card" id="ai-welcome">
-        <h4>${ICONS.sparkle} 你好！我是你的算法竞赛助教</h4>
+        <h4>${ICONS.sparkle} 你好！我是你的算法竞赛助手</h4>
         <div>${isRecordPage ? '已自动载入你本次提交的代码与评测状态。请问需要排查哪方面的疑问？' : '已自动载入当前题面信息。需要思路分析或复杂度建议随时问我！'}</div>
         <div class="ai-prompts-group">${welcomePrompts}</div>
       </div>
@@ -829,10 +829,15 @@ function setupAiAssistantUI() {
               bubbleEl.innerHTML = renderMarkdown(assistantMsg.content);
               bodyEl.scrollTop = bodyEl.scrollHeight;
             } catch {
-              // 忽略解析片段异常
+              // 忽略单个 chunk 的解析异常
             }
           }
         }
+      }
+
+      if (!assistantMsg.content.trim()) {
+        assistantMsg.content = '⚠️ **提示**：未收到 AI 返回内容。请检查后台设置中的模型名称（如 `glm-4-flash`）是否正确。';
+        bubbleEl.innerHTML = renderMarkdown(assistantMsg.content);
       }
     } catch (err: any) {
       if (err.name === 'AbortError') {
